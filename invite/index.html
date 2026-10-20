@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="only light">
+<title>첫 생일 초대장</title>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="첫 생일 초대장">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:title" content="첫 생일에 초대합니다">
+<meta property="og:description" content="11월 7일 토요일 오전 11시 30분">
+<meta property="og:image" content="https://nvjs46-crypto.github.io/invite/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="600">
+<meta property="og:image:alt" content="달항아리 입구를 잡은 아기 손과 '첫 생일에 초대합니다' 붓글씨">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+html,body{margin:0;height:100%;background:#B2997A}
+body{display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-align:center;-webkit-align-items:center;align-items:center;
+  -webkit-box-pack:center;-webkit-justify-content:center;justify-content:center;
+  font-family:"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;word-break:keep-all}
+.ld{width:84%;max-width:380px;box-sizing:border-box;padding:40px 24px 34px;background:#FCFAF5 url(img/paper.png);
+  background-size:160px 160px;border-radius:6px;text-align:center;color:#2E241C}
+.moon{width:56px;height:56px;margin:0 auto 18px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#FFFFFF 0%,#F1ECE2 55%,#D9CDB8 100%);box-shadow:0 2px 10px rgba(80,60,30,.18)}
+.t{margin:0;font-size:21px;font-weight:700}
+.bar{height:6px;margin:20px auto 0;width:70%;border-radius:6px;background:#E3D8C7;overflow:hidden}
+.bar i{display:block;height:100%;width:8%;background:#7A6247;-webkit-transition:width .2s;transition:width .2s}
+.m{margin:18px 0 0;font-size:17px;line-height:1.6;color:#3F3128}
+.m:empty{display:none}
+</style>
+</head>
+<body>
+<main class="ld" role="status" aria-live="polite">
+  <div class="moon" aria-hidden="true"></div>
+  <p class="t" id="t">초대장을 여는 중입니다</p>
+  <div class="bar" id="barw"><i id="bar"></i></div>
+  <p class="m" id="m"></p>
+</main>
+<script>
+(function(){
+  var t=document.getElementById('t'),m=document.getElementById('m'),bar=document.getElementById('bar'),barw=document.getElementById('barw');
+  function fail(title,msg){t.textContent=title;m.textContent=msg;barw.style.display='none';}
+  var hex=(location.hash||'').replace(/^#/,'').toLowerCase();
+  if(!/^[0-9a-f]{32}$/.test(hex)){fail('초대장 링크가 필요해요','카카오톡으로 받은 초대장 링크를 눌러 주세요. 링크 끝부분까지 있어야 열립니다.');return;}
+  var c=window.crypto||window.msCrypto,subtle=c&&(c.subtle||c.webkitSubtle);
+  if(!subtle||!window.Promise||!window.Uint8Array){fail('이 화면에서는 열리지 않아요','크롬이나 사파리에서 링크를 열어 주세요.');return;}
+  function bytes(h){var a=new Uint8Array(h.length/2);for(var i=0;i<a.length;i++)a[i]=parseInt(h.substr(i*2,2),16);return a;}
+  function utf8(buf){
+    if(window.TextDecoder)return new TextDecoder('utf-8').decode(buf);
+    var s='',b=new Uint8Array(buf);for(var i=0;i<b.length;i+=8192)s+=String.fromCharCode.apply(null,b.subarray(i,i+8192));
+    return decodeURIComponent(escape(s));
+  }
+  var x=new XMLHttpRequest();
+  x.open('GET','c/00.bin',true);x.responseType='arraybuffer';
+  x.onprogress=function(e){if(e.lengthComputable)bar.style.width=Math.max(8,Math.round(e.loaded/e.total*100))+'%';};
+  x.onerror=function(){fail('초대장을 불러오지 못했어요','인터넷 연결을 확인한 뒤 다시 열어 주세요.');};
+  x.onload=function(){
+    if(x.status!==200){fail('초대장을 불러오지 못했어요','잠시 뒤 다시 열어 주세요.');return;}
+    bar.style.width='100%';
+    var b=new Uint8Array(x.response);
+    subtle.importKey('raw',bytes(hex),{name:'AES-GCM'},false,['decrypt'])
+      .then(function(k){return subtle.decrypt({name:'AES-GCM',iv:b.subarray(0,12)},k,b.subarray(12));})
+      .then(function(p){var html=utf8(p);document.open();document.write(html);document.close();},
+            function(){fail('초대장을 열지 못했어요','링크가 잘렸을 수 있어요. 카카오톡의 링크를 끝까지 그대로 눌러 주세요.');});
+  };
+  x.send();
+})();
+</script>
+</body>
+</html>
