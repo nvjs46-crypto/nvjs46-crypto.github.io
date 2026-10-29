@@ -29,7 +29,7 @@ html,body{height:100%;overscroll-behavior:none}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--text);overflow:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .backdrop{position:fixed;top:0;left:0;width:100%;height:100%;background:#1a1b18;background:radial-gradient(ellipse at 54% 46%,#4a4a42 0%,#25261f 38%,#0c0d0c 100%)}
 #scene{position:fixed;top:0;left:0;width:100%;height:100%;display:block;opacity:0;transition:opacity 1.4s ease;touch-action:none}
-.cam-src{position:fixed;left:0;bottom:0;width:4px;height:4px;opacity:.01;pointer-events:none}
+.cam-src{position:fixed;left:0;bottom:0;width:64px;height:48px;opacity:.02;pointer-events:none}
 #scene.on{opacity:1}
 .shell{position:fixed;top:0;right:0;bottom:0;left:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;
   padding-top:18px;padding-top:calc(18px + env(safe-area-inset-top, 0px));
@@ -101,8 +101,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
 .preview{position:absolute;right:24px;right:max(24px, env(safe-area-inset-right, 0px));bottom:64px;bottom:calc(64px + env(safe-area-inset-bottom, 0px));width:176px;height:132px;
   overflow:hidden;border:1px solid var(--rule);border-radius:10px;background:#000;pointer-events:none}
 .preview canvas{position:absolute;top:0;left:0;width:100%;height:100%;-webkit-transform:scaleX(-1);transform:scaleX(-1)}
-.pv-read{position:absolute;left:0;right:0;bottom:0;padding:5px 7px;background:rgba(0,0,0,.55);color:#fff;font:600 10.5px/1.2 var(--ui);font-variant-numeric:tabular-nums}
-.settings + .preview,.has-settings .preview{display:none}
+.pv-read{position:absolute;left:0;right:0;bottom:0;padding:5px 7px;background:rgba(0,0,0,.6);color:#fff;font:600 10.5px/1.3 var(--ui);font-variant-numeric:tabular-nums;white-space:pre-line}
 .clean .tracker,.clean .panel,.clean .preview,.clean .toast{display:none !important}
 @media (pointer:coarse){.pill{padding:11px 15px;font-size:13px}.btn{padding:10px 13px}}
 @media (max-width:720px){
@@ -1201,28 +1200,34 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
     var mc = 3.2 - 2.8 * S.smooth;
     for (var i = 0; i < 3; i++) { filt[i].minCutoff = mc; filt[i].beta = 0.07 - 0.05 * S.smooth; }
   }
-  function onSample(s, t) {
-    if (!s) { if (!track.lostAt) track.lostAt = t; setTrackerState('lost'); return; }
-    if (track.lostAt) { track.lostAt = 0; setTrackerState('live'); }
+  function onSample(s, t, info) {
+    track.lastFrameAt = t;
+    if (info) track.info = info;
+    if (!s) {
+      if (!track.lostAt) track.lostAt = t;
+      if (t - track.lostAt > 500 && track.state !== 'lost') setTrackerState('lost');
+      return;
+    }
+    track.lostAt = 0;
+    if (track.state !== 'live') setTrackerState('live');
     var fpx = (Math.sqrt(s.vw * s.vw + s.vh * s.vh) / 2) / Math.tan(S.dfov * Math.PI / 360);
     var Z = fpx * IPD_CM * Math.max(0.55, s.cosYaw) / Math.max(4, s.ipd);
     var X = -(s.mx - s.vw / 2) * Z / fpx;
     var Y = -(s.my - s.vh / 2) * Z / fpx;
     var off = camOffsetCm();
     var raw = { x: X + off.x, y: Y + off.y, z: Z };
-    track.raw = raw;
+    track.raw = raw; track.pts = s.pts; track.faceAt = t;
     track.phys = { x: filt[0].filter(raw.x, t), y: filt[1].filter(raw.y, t), z: filt[2].filter(raw.z, t) };
     track.lastAt = t;
-    track.n = (track.n || 0) + 1;
-    if (track.needCenter && track.n > 18) {
-      track.needCenter = false;
-      S.cx = track.phys.x; S.cy = track.phys.y; saveSettings();
-      toast('지금 자세를 정면으로 맞췄습니다 · 두 번 탭하면 버튼 숨김');
+    // phones: the first pose counts as "straight ahead" at once, refined over the first 20 samples (never freezes the view)
+    if (track.centerN < 20) {
+      track.centerN++;
+      if (track.centerN === 1) { S.cx = raw.x; S.cy = raw.y; }
+      else { S.cx += (raw.x - S.cx) / track.centerN; S.cy += (raw.y - S.cy) / track.centerN; }
+      if (track.centerN === 20) { saveSettings(); toast('지금 자세를 정면으로 맞췄습니다 · 두 번 탭하면 버튼 숨김'); }
     }
-    if (S.preview) drawPreview(s);
   }
   function headTarget() {
-    if (track.needCenter) { target.set(0, BASE_Y, EZ0); return; }
     var ppc = pxPerCm(), wphys = window.innerWidth / ppc, K = WV / Math.max(1, wphys), p = track.phys;
     target.set(clamp((p.x - S.cx) * K * S.gain, -700, 700), clamp((p.y - S.cy) * K * S.gain, -420, 420), clamp(p.z * K * S.lens, 140, 2600));
   }
@@ -1236,6 +1241,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
   }
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && track.live) keepAwake(true); });
   function setTrackerState(st, msg) {
+    track.state = st;
     if (!trackerEl) return;
     trackerEl.className = 'tracker' + (st === 'live' ? ' live' : st === 'busy' ? ' busy' : st === 'lost' ? ' lost' : st === 'err' ? ' err' : '');
     var labels = { off: '머리 추적 꺼짐 · 켜기', busy: msg || '준비 중…', live: '머리 추적 중 · 끄기', lost: '얼굴을 찾는 중…', err: msg || '오류 · 다시 시도' };
@@ -1251,16 +1257,24 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setTrackerState('err', '카메라를 쓸 수 없는 환경입니다 (https 또는 파일로 열기)'); return; }
     track.starting = true;
-    track.n = 0; track.needCenter = IS_PHONE;
+    track.centerN = IS_PHONE ? 0 : 99; track.info = null; track.faceAt = 0; track.pts = null;
     filt.forEach(function (f) { f.reset(); });
     window.BoringTracker.start({
       video: pvVideo,
-      onStatus: function (st) { setTrackerState('busy', st === 'camera' ? '카메라 여는 중…' : '얼굴 모델 불러오는 중…'); },
+      phone: IS_PHONE,
+      onStatus: function (st, detail) {
+        if (st === 'camera') setTrackerState('busy', '카메라 여는 중…');
+        else if (st === 'model') setTrackerState('busy', '얼굴 모델 불러오는 중…');
+        else if (st === 'fallback') { setTrackerState('busy', '일반 방식으로 전환 중…'); toast('그래픽 가속 인식이 안 되어 일반 방식으로 바꿨습니다'); if (window.console) console.warn('[BORING] fallback to CPU:', detail); }
+        else if (st === 'error') { setTrackerState('err', '인식 오류 · 끄고 다시 켜기'); if (window.console) console.warn('[BORING] detect error', detail); }
+      },
       onSample: onSample
-    }).then(function () {
+    }).then(function (cam) {
       track.starting = false; track.live = true; track.lostAt = 0;
+      track.cam = cam || {}; track.lastFrameAt = performance.now();
       setTrackerState('live');
       keepAwake(true);
+      previewUntil = performance.now() + 9000;
       updatePreviewVisibility();
     }).catch(function (err) {
       track.starting = false; track.live = false;
@@ -1280,17 +1294,37 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
     setTrackerState('off');
     updatePreviewVisibility();
   }
-  var pvCtx = null, pvRead = null, pvBox = null;
-  function updatePreviewVisibility() { if (pvBox) pvBox.hidden = !(S.preview && track.live) || openPanel === 'panel-settings'; }
-  function drawPreview(s) {
-    if (!pvCtx) return;
-    var W = pvCtx.canvas.width, H = pvCtx.canvas.height;
-    var sc = Math.max(W / s.vw, H / s.vh), ox = (W - s.vw * sc) / 2, oy = (H - s.vh * sc) / 2;
+  var pvCtx = null, pvRead = null, pvBox = null, previewUntil = 0, pvLastDraw = 0, pvShown = false;
+  function updatePreviewVisibility(now) {
+    if (!pvBox) return;
+    var t = typeof now === 'number' ? now : performance.now();
+    var want = track.live && (S.preview || t < previewUntil) && openPanel !== 'panel-settings';
+    if (want !== pvShown) { pvShown = want; pvBox.hidden = !want; }
+  }
+  function drawPreview(now) {
+    if (!pvCtx || !pvVideo) return;
+    var vw = pvVideo.videoWidth, vh = pvVideo.videoHeight;
+    if (!vw || !vh) { pvRead.textContent = '카메라 영상 없음'; return; }
+    var portrait = vh > vw, W = portrait ? 120 : 176, H = portrait ? 160 : 132;
+    if (pvCtx.canvas.width !== W) { pvCtx.canvas.width = W; pvCtx.canvas.height = H; pvBox.style.width = W + 'px'; pvBox.style.height = H + 'px'; }
+    var sc = Math.max(W / vw, H / vh), ox = (W - vw * sc) / 2, oy = (H - vh * sc) / 2;
     pvCtx.clearRect(0, 0, W, H);
-    try { pvCtx.drawImage(pvVideo, ox, oy, s.vw * sc, s.vh * sc); } catch (e) {}
-    pvCtx.fillStyle = '#93e0aa';
-    for (var i = 0; i < 2; i++) { pvCtx.beginPath(); pvCtx.arc(ox + s.pts[i * 2] * sc, oy + s.pts[i * 2 + 1] * sc, 3, 0, Math.PI * 2); pvCtx.fill(); }
-    if (track.phys) pvRead.textContent = 'x ' + track.phys.x.toFixed(1) + ' · y ' + track.phys.y.toFixed(1) + ' · z ' + track.phys.z.toFixed(0) + ' cm';
+    try { pvCtx.drawImage(pvVideo, ox, oy, vw * sc, vh * sc); } catch (e) {}
+    var fresh = track.faceAt && now - track.faceAt < 400 && track.pts;
+    if (fresh) {
+      pvCtx.fillStyle = '#93e0aa';
+      for (var i = 0; i < 2; i++) { pvCtx.beginPath(); pvCtx.arc(ox + track.pts[i * 2] * sc, oy + track.pts[i * 2 + 1] * sc, 3.2, 0, Math.PI * 2); pvCtx.fill(); }
+    }
+    var cam = track.cam || {}, info = track.info || {};
+    var which = cam.facing === 'user' ? '전면 카메라' : cam.facing === 'environment' ? '후면 카메라' : '카메라';
+    var state = fresh ? '눈 인식 ✓ · ' + track.phys.z.toFixed(0) + 'cm' : (now - (track.lastFrameAt || 0) > 1500 ? '영상 멈춤' : '얼굴 찾는 중');
+    pvRead.textContent = which + ' · ' + (info.mode === 'CPU' ? '일반' : '가속') + '\n' + state;
+  }
+  function uiTick(now) {
+    if (!HEADTRACK || !pvBox) return;
+    updatePreviewVisibility(now);
+    if (pvShown && now - pvLastDraw > 66) { pvLastDraw = now; drawPreview(now); }
+    if (track.live && track.state !== 'err' && track.lastFrameAt && now - track.lastFrameAt > 2500) setTrackerState('err', '카메라 영상이 들어오지 않습니다 · 끄고 다시 켜기');
   }
   function toggleFullscreen() {
     var de = document.documentElement;
@@ -1320,7 +1354,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
     syncSettingsUI();
     $('#s-preview').addEventListener('change', function (e) { S.preview = e.target.checked; saveSettings(); updatePreviewVisibility(); });
     $('#b-center').addEventListener('click', recenter);
-    $('#b-reset').addEventListener('click', function () { var keep = S.preview; try { localStorage.removeItem(STORE); } catch (e) {} S = loadSettings(); S.preview = keep; applySmoothing(); syncSettingsUI(); if (IS_PHONE && track.live) { track.n = 0; track.needCenter = true; } toast('설정을 처음 값으로 되돌렸습니다'); });
+    $('#b-reset').addEventListener('click', function () { var keep = S.preview; try { localStorage.removeItem(STORE); } catch (e) {} S = loadSettings(); S.preview = keep; applySmoothing(); syncSettingsUI(); if (IS_PHONE && track.live) { track.centerN = 0; } toast('설정을 처음 값으로 되돌렸습니다'); });
     $('#b-full').addEventListener('click', toggleFullscreen);
     document.addEventListener('click', function () { setTimeout(updatePreviewVisibility, 0); });
     if (navigator.permissions && navigator.permissions.query) {
@@ -1389,10 +1423,13 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
     compMat.uniforms.uTime.value = STILL ? 0 : (now / 1000) % 100;
     runPass(compMat, null);
   }
+  var NOLOOP = /[?&]noloop\b/.test(qs);
   function loop(now) {
     requestAnimationFrame(loop);
     var dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000)); last = now;
     updateEye(dt, now);
+    uiTick(now);
+    if (NOLOOP) return;
     render(now);
     // adaptive resolution
     frameAvg = frameAvg * 0.95 + dt * 1000 * 0.05; frames++;
@@ -1410,7 +1447,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
     var a = orientAngle();
     if (a === lastAngle) return;
     lastAngle = a;
-    if (IS_PHONE && track.live) { track.n = 0; track.needCenter = true; }
+    if (IS_PHONE && track.live) { track.centerN = 0; }
   }
   window.addEventListener('orientationchange', function () { setTimeout(onRotate, 350); });
   window.addEventListener('resize', function () { setTimeout(onRotate, 350); });
@@ -1423,12 +1460,11 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
       render(performance.now());
       canvas.className = 'on';
       window.__boringReady = true;
-      if (/[?&]noloop\b/.test(qs)) {
+      if (NOLOOP) {
         window.__boringShot = function (x, y, z) { eye.set(x, y, z); var t = performance.now(); render(t); renderer.getContext().finish(); return Math.round(performance.now() - t); };
-        window.__boringTrack = function () { if (track.live && track.phys) headTarget(); return { live: track.live, lost: !!track.lostAt, raw: track.raw || null, phys: track.phys, target: target.toArray(), K: WV / (window.innerWidth / pxPerCm()), cam: camOffsetCm(), phone: IS_PHONE, needCenter: !!track.needCenter, cx: S.cx, cy: S.cy, screenCm: S.screenCm, dfov: S.dfov, lens: S.lens, wv: WV, hv: HV, half: HALF }; };
-      } else {
-        requestAnimationFrame(loop);
+        window.__boringTrack = function () { if (track.live && track.phys) headTarget(); return { live: track.live, state: track.state, lost: !!track.lostAt, raw: track.raw || null, phys: track.phys, target: target.toArray(), K: WV / (window.innerWidth / pxPerCm()), cam: camOffsetCm(), phone: IS_PHONE, centerN: track.centerN, cx: S.cx, cy: S.cy, screenCm: S.screenCm, dfov: S.dfov, lens: S.lens, wv: WV, hv: HV, half: HALF, info: track.info || null, camInfo: track.cam || null, preview: pvShown, readout: pvRead ? pvRead.textContent : '' }; };
       }
+      requestAnimationFrame(loop);
     } catch (err) {
       document.body.className += ' no-gl';
       if (window.console) console.error('[BORING] failed to start', err);
@@ -1441,44 +1477,76 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
 <script type="module">
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 const MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-let lm = null, stream = null, video = null, raf = 0, lastT = -1, running = false, onSample = null;
+const COMMON = { runningMode: 'VIDEO', numFaces: 1, outputFacialTransformationMatrixes: true, outputFaceBlendshapes: false };
+let vision = null, files = null, lm = null, mode = 'GPU', stream = null, video = null, raf = 0;
+let lastT = -1, lastProc = 0, lastTs = 0, running = false, switching = false;
+let onSample = () => {}, onStatus = () => {}, autoFallback = false, errCount = 0, frames = 0, faces = 0;
+
+async function makeLandmarker(delegate) {
+  if (lm) { try { lm.close(); } catch (e) {} lm = null; }
+  lm = await vision.FaceLandmarker.createFromOptions(files, Object.assign({ baseOptions: { modelAssetPath: MODEL, delegate } }, COMMON));
+  mode = delegate; errCount = 0; frames = 0; faces = 0;
+}
 
 async function start(opts) {
   onSample = opts.onSample;
-  const status = opts.onStatus || (() => {});
-  status('camera');
+  onStatus = opts.onStatus || (() => {});
+  autoFallback = !!opts.phone;
+  onStatus('camera');
   stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } } });
   video = opts.video;
-  video.srcObject = stream;
   video.muted = true;
+  video.setAttribute('muted', '');
   video.setAttribute('playsinline', '');
-  await video.play();
+  video.setAttribute('autoplay', '');
+  video.srcObject = stream;
+  try { await video.play(); } catch (e) {}
+  if (!video.videoWidth) await new Promise((res) => { video.addEventListener('loadeddata', res, { once: true }); setTimeout(res, 3000); });
   if (!lm) {
-    status('model');
-    const vision = await import(MP + '/vision_bundle.mjs');
-    const files = await vision.FilesetResolver.forVisionTasks(MP + '/wasm');
-    const common = { runningMode: 'VIDEO', numFaces: 1, outputFacialTransformationMatrixes: true, outputFaceBlendshapes: false };
-    try {
-      lm = await vision.FaceLandmarker.createFromOptions(files, Object.assign({ baseOptions: { modelAssetPath: MODEL, delegate: 'GPU' } }, common));
-    } catch (e) {
-      lm = await vision.FaceLandmarker.createFromOptions(files, Object.assign({ baseOptions: { modelAssetPath: MODEL, delegate: 'CPU' } }, common));
-    }
-  }
-  running = true;
-  lastT = -1;
-  tick();
+    onStatus('model');
+    vision = vision || await import(MP + '/vision_bundle.mjs');
+    files = files || await vision.FilesetResolver.forVisionTasks(MP + '/wasm');
+    try { await makeLandmarker('GPU'); } catch (e) { await makeLandmarker('CPU'); }
+  } else { errCount = 0; frames = 0; faces = 0; }
+  running = true; lastT = -1; lastProc = 0;
+  loop();
+  const tr = stream.getVideoTracks()[0];
+  const st = tr && tr.getSettings ? tr.getSettings() : {};
+  return { facing: st.facingMode || '', label: (tr && tr.label) || '', width: video.videoWidth, height: video.videoHeight, mode };
 }
 
-function tick() {
+function loop() {
   if (!running) return;
-  raf = requestAnimationFrame(tick);
-  if (!video || video.readyState < 2 || video.currentTime === lastT) return;
-  lastT = video.currentTime;
-  const t = performance.now();
+  raf = requestAnimationFrame(loop);
+  step();
+}
+
+function step() {
+  if (!video || !lm || switching || video.readyState < 2 || !video.videoWidth) return;
+  const now = performance.now();
+  const ct = video.currentTime;
+  // some phone browsers never advance currentTime for camera streams, so read a frame at least every 60 ms anyway
+  if (ct === lastT && now - lastProc < 60) return;
+  lastT = ct; lastProc = now;
+  const ts = Math.max(now, lastTs + 1); lastTs = ts;
   let r;
-  try { r = lm.detectForVideo(video, t); } catch (e) { return; }
+  try { r = lm.detectForVideo(video, ts); errCount = 0; }
+  catch (e) {
+    errCount++;
+    if (errCount >= 3 && mode === 'GPU') fallback(e);
+    else if (errCount === 15) onStatus('error', e);
+    return;
+  }
+  frames++;
+  const info = { mode, frames, faces };
   const vw = video.videoWidth, vh = video.videoHeight;
-  if (!r || !r.faceLandmarks || !r.faceLandmarks.length) { onSample(null, t); return; }
+  if (!r || !r.faceLandmarks || !r.faceLandmarks.length) {
+    onSample(null, ts, info);
+    // phone GPUs sometimes run without errors but never find a face: retry on the CPU once
+    if (autoFallback && mode === 'GPU' && faces === 0 && frames >= 75) fallback('no face found with GPU');
+    return;
+  }
+  faces++; info.faces = faces;
   const L = r.faceLandmarks[0];
   const a = L[468] || L[33], b = L[473] || L[263];
   const ax = a.x * vw, ay = a.y * vh, bx = b.x * vw, by = b.y * vh;
@@ -1488,7 +1556,15 @@ function tick() {
     const zx = M.data[8], zz = M.data[10], hyp = Math.hypot(zx, zz);
     if (hyp > 1e-6) cosYaw = Math.abs(zz) / hyp;
   }
-  onSample({ mx: (ax + bx) / 2, my: (ay + by) / 2, ipd: Math.hypot(ax - bx, ay - by), cosYaw, vw, vh, pts: [ax, ay, bx, by] }, t);
+  onSample({ mx: (ax + bx) / 2, my: (ay + by) / 2, ipd: Math.hypot(ax - bx, ay - by), cosYaw, vw, vh, pts: [ax, ay, bx, by] }, ts, info);
+}
+
+async function fallback(why) {
+  if (switching) return;
+  switching = true;
+  onStatus('fallback', why);
+  try { await makeLandmarker('CPU'); } catch (e) { onStatus('error', e); }
+  switching = false;
 }
 
 function stop() {
