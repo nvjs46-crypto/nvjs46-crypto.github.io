@@ -166,6 +166,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
     <div class="row"><label for="s-lens">원근감 (광각) <output id="o-lens"></output></label><input type="range" id="s-lens" min="0.5" max="1.2" step="0.05"></div>
     <div class="row"><label for="s-smooth">떨림 보정 <output id="o-smooth"></output></label><input type="range" id="s-smooth" min="0" max="1" step="0.05"></div>
     <label class="check" for="s-preview"><input type="checkbox" id="s-preview">카메라 미리보기</label>
+    <label class="check" for="s-invert"><input type="checkbox" id="s-invert">움직임 방향 반대로</label>
     <div class="btns"><button type="button" class="btn" id="b-center">가운데 맞춤</button><button type="button" class="btn" id="b-reset">초기화</button><button type="button" class="btn" id="b-full">전체 화면</button></div>
     <p class="note"><span class="keys">단축키: H 화면 정리, F 전체 화면, C 가운데 맞춤, D 미리보기<br></span><span class="taps">화면을 두 번 탭하면 버튼이 숨겨지고, 다시 두 번 탭하면 나타납니다.<br></span>카메라 영상은 이 기기 안에서만 처리됩니다.</p>
   </div>
@@ -1169,7 +1170,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
   function defaultScreenCm() { return Math.round(screenNaturalPx() / (IS_PHONE ? 61 : 45) * (IS_PHONE ? 10 : 2)) / (IS_PHONE ? 10 : 2); }
   var STORE = 'boring.window.v2';
   function loadSettings() {
-    var d = { screenCm: defaultScreenCm(), dfov: IS_PHONE ? 80 : 75, gain: 1, lens: IS_PHONE ? 0.6 : 0.7, smooth: 0.5, preview: false, cx: 0, cy: 0 };
+    var d = { screenCm: defaultScreenCm(), dfov: IS_PHONE ? 80 : 75, gain: 1, lens: IS_PHONE ? 0.6 : 0.7, smooth: 0.5, preview: false, invert: IS_PHONE, cx: 0, cy: 0 };
     try { var s = JSON.parse(localStorage.getItem(STORE) || 'null'); if (s) for (var k in d) if (typeof s[k] === typeof d[k]) d[k] = s[k]; } catch (e) {}
     return d;
   }
@@ -1228,8 +1229,9 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
     }
   }
   function headTarget() {
-    var ppc = pxPerCm(), wphys = window.innerWidth / ppc, K = WV / Math.max(1, wphys), p = track.phys;
-    target.set(clamp((p.x - S.cx) * K * S.gain, -700, 700), clamp((p.y - S.cy) * K * S.gain, -420, 420), clamp(p.z * K * S.lens, 140, 2600));
+    // invert: phones are tilted rather than heads moved, so the view follows the tilt (default on phones)
+    var ppc = pxPerCm(), wphys = window.innerWidth / ppc, K = WV / Math.max(1, wphys), p = track.phys, sg = S.invert ? -1 : 1;
+    target.set(clamp(sg * (p.x - S.cx) * K * S.gain, -700, 700), clamp(sg * (p.y - S.cy) * K * S.gain, -420, 420), clamp(p.z * K * S.lens, 140, 2600));
   }
 
   var trackerEl = null, htLabel = null, pvVideo = null, wakeLock = null;
@@ -1350,9 +1352,10 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
       el.addEventListener('input', function () { S[f[1]] = parseFloat(el.value); out.textContent = f[2](S[f[1]]); applySmoothing(); saveSettings(); });
       f.push(el, out);
     });
-    function syncSettingsUI() { fields.forEach(function (f) { f[3].value = S[f[1]]; f[4].textContent = f[2](S[f[1]]); }); $('#s-preview').checked = !!S.preview; }
+    function syncSettingsUI() { fields.forEach(function (f) { f[3].value = S[f[1]]; f[4].textContent = f[2](S[f[1]]); }); $('#s-preview').checked = !!S.preview; $('#s-invert').checked = !!S.invert; }
     syncSettingsUI();
     $('#s-preview').addEventListener('change', function (e) { S.preview = e.target.checked; saveSettings(); updatePreviewVisibility(); });
+    $('#s-invert').addEventListener('change', function (e) { S.invert = e.target.checked; saveSettings(); toast(S.invert ? '움직임 방향을 반대로 바꿨습니다' : '움직임 방향을 원래대로 바꿨습니다'); });
     $('#b-center').addEventListener('click', recenter);
     $('#b-reset').addEventListener('click', function () { var keep = S.preview; try { localStorage.removeItem(STORE); } catch (e) {} S = loadSettings(); S.preview = keep; applySmoothing(); syncSettingsUI(); if (IS_PHONE && track.live) { track.centerN = 0; } toast('설정을 처음 값으로 되돌렸습니다'); });
     $('#b-full').addEventListener('click', toggleFullscreen);
@@ -1462,7 +1465,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
       window.__boringReady = true;
       if (NOLOOP) {
         window.__boringShot = function (x, y, z) { eye.set(x, y, z); var t = performance.now(); render(t); renderer.getContext().finish(); return Math.round(performance.now() - t); };
-        window.__boringTrack = function () { if (track.live && track.phys) headTarget(); return { live: track.live, state: track.state, lost: !!track.lostAt, raw: track.raw || null, phys: track.phys, target: target.toArray(), K: WV / (window.innerWidth / pxPerCm()), cam: camOffsetCm(), phone: IS_PHONE, centerN: track.centerN, cx: S.cx, cy: S.cy, screenCm: S.screenCm, dfov: S.dfov, lens: S.lens, wv: WV, hv: HV, half: HALF, info: track.info || null, camInfo: track.cam || null, preview: pvShown, readout: pvRead ? pvRead.textContent : '' }; };
+        window.__boringTrack = function () { if (track.live && track.phys) headTarget(); return { live: track.live, state: track.state, lost: !!track.lostAt, raw: track.raw || null, phys: track.phys, target: target.toArray(), K: WV / (window.innerWidth / pxPerCm()), cam: camOffsetCm(), phone: IS_PHONE, centerN: track.centerN, cx: S.cx, cy: S.cy, invert: S.invert, screenCm: S.screenCm, dfov: S.dfov, lens: S.lens, wv: WV, hv: HV, half: HALF, info: track.info || null, camInfo: track.cam || null, preview: pvShown, readout: pvRead ? pvRead.textContent : '' }; };
       }
       requestAnimationFrame(loop);
     } catch (err) {
